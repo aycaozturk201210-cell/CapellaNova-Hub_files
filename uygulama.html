@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="tr" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CapellaNova Hub</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --page: #0f172a;
+            --frame: #0b1220;
+            --bar: #172033;
+            --button: #2b3a55;
+            --active: #2563eb;
+            --text: #f8fafc;
+        }
+
+        html:not(.dark) {
+            color-scheme: light;
+            --page: #f1f5f9;
+            --frame: #ffffff;
+            --bar: #ffffff;
+            --button: #e2e8f0;
+            --active: #2563eb;
+            --text: #0f172a;
+        }
+
+        * { box-sizing: border-box; }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: var(--page);
+        }
+
+        .app-header {
+            min-height: 58px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 18px;
+            background: var(--bar);
+        }
+
+        .topbar {
+            min-width: 0;
+            display: flex;
+            flex: 1;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .brand {
+            margin-right: auto;
+            color: var(--text);
+            font-weight: 700;
+            letter-spacing: .03em;
+        }
+
+        .topbar button {
+            padding: 9px 13px;
+            color: var(--text);
+            background: var(--button);
+            border: 0;
+            border-radius: 6px;
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .topbar button:hover,
+        .topbar button.active { background: var(--active); }
+        html:not(.dark) .topbar button:hover,
+        html:not(.dark) .topbar button.active { color: #ffffff; }
+
+        .theme-toggle {
+            flex: 0 0 40px;
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            color: var(--text);
+            background: var(--button);
+            border: 1px solid rgba(148, 163, 184, .25);
+            border-radius: 50%;
+            font-size: 1.15rem;
+            cursor: pointer;
+        }
+
+        .theme-toggle:hover { background: var(--active); }
+
+        .language-status {
+            color: var(--text);
+            font-size: .8rem;
+        }
+
+        #appFrame {
+            display: block;
+            width: 100%;
+            height: calc(100% - 58px);
+            border: 0;
+            background: var(--frame);
+        }
+
+        @media (max-width: 600px) {
+            .brand { width: 100%; }
+            #appFrame { height: calc(100% - 100px); }
+            .app-header { align-items: flex-start; }
+            .theme-toggle { margin-top: 8px; }
+        }
+    </style>
+</head>
+<body>
+    <header class="app-header">
+        <nav class="topbar" aria-label="Uygulama bölümleri">
+            <div class="brand">CapellaNova</div>
+            <button type="button" data-page="capellanova_dashboard.html">SAR Dashboard</button>
+            <button class="active" type="button" data-page="capellanova6_website.html">Yangın Analizi</button>
+            <button type="button" data-page="ilk 3 ülke.html">İlk 3 Ülke</button>
+            <button type="button" data-page="depremler.html">Deprem Analizi</button>
+            <button type="button" data-page="sel.html">Sel Analizi</button>
+            <button type="button" data-page="kuraklasma-yangin.html">Kuraklaşma &amp; Yangın</button>
+            <button type="button" data-page="capellanova 3.html">NISAR Viewer</button>
+            <button type="button" data-page="capellanova 4.html">NISAR Bilgi</button>
+            <button type="button" data-page="petrol-sizintisi.html">Petrol Sızıntısı</button>
+            <button type="button" data-page="nisar-insar-analiz.html">NISAR &amp; InSAR Bilimsel Analiz</button>
+        </nav>
+        <span class="language-status" id="languageStatus" role="status" aria-live="polite"></span>
+        <button type="button" class="theme-toggle" id="themeToggle" aria-label="Gündüz moduna geç" title="Gündüz moduna geç">☀️</button>
+    </header>
+
+    <iframe id="appFrame" title="CapellaNova uygulama içeriği" src="capellanova6_website.html"></iframe>
+
+    <script>
+        const appFrame = document.getElementById("appFrame");
+        const pageButtons = document.querySelectorAll(".topbar button[data-page]");
+        const themeToggle = document.getElementById("themeToggle");
+        const languageStatus = document.getElementById("languageStatus");
+        const englishPageLabels = ["SAR Dashboard", "Fire Analysis", "Top 3 Countries", "Earthquake Analysis", "Flood Analysis", "Drought & Wildfire", "NISAR Viewer", "About NISAR", "Oil Spill Analysis", "NISAR & InSAR Analysis"];
+        const isEnglish = true;
+        let translationGeneration = 0;
+        let translationDocument = null;
+        let translationEntries = [];
+        let translationObserver = null;
+        let trackedTextNodes = new WeakSet();
+        let tooltipTranslations = new Map();
+        let pendingTooltipTranslations = new Map();
+
+        function setTheme(isDark) {
+            document.documentElement.classList.toggle("dark", isDark);
+            themeToggle.textContent = isDark ? "☀️" : "🌙";
+            const themeLabel = isEnglish
+                ? (isDark ? "Switch to light mode" : "Switch to dark mode")
+                : (isDark ? "Gündüz moduna geç" : "Gece moduna geç");
+            themeToggle.setAttribute("aria-label", themeLabel);
+            themeToggle.setAttribute("title", themeLabel);
+        }
+
+        function sendThemeToFrame() {
+            appFrame.contentWindow.postMessage({
+                type: "capella-theme",
+                dark: document.documentElement.classList.contains("dark")
+            }, "*");
+        }
+
+        function setAppLanguage() {
+            document.documentElement.lang = isEnglish ? "en" : "tr";
+            document.querySelector(".topbar").setAttribute("aria-label", isEnglish ? "App sections" : "Uygulama bölümleri");
+            appFrame.title = isEnglish ? "CapellaNova application content" : "CapellaNova uygulama içeriği";
+            setTheme(document.documentElement.classList.contains("dark"));
+            pageButtons.forEach((button, index) => {
+                button.textContent = englishPageLabels[index];
+            });
+        }
+
+        function restoreFrameTranslation() {
+            if (translationObserver) translationObserver.disconnect();
+            translationObserver = null;
+            translationEntries.forEach((entry) => entry.restore());
+            const translatedWindow = translationDocument && translationDocument.defaultView;
+            if (translatedWindow && translatedWindow.Chart) {
+                Object.keys(translatedWindow.Chart.instances).forEach((key) => {
+                    translatedWindow.Chart.instances[key].update("none");
+                });
+            }
+            translationDocument = null;
+            translationEntries = [];
+            trackedTextNodes = new WeakSet();
+            tooltipTranslations = new Map();
+            pendingTooltipTranslations = new Map();
+        }
+
+        function translateTooltipValue(value, chart, generation) {
+            if (Array.isArray(value)) {
+                return value.map((item) => translateTooltipValue(item, chart, generation));
+            }
+            if (typeof value !== "string" || !value.trim() || !isEnglish) return value;
+            const text = value.trim();
+            if (tooltipTranslations.has(text)) return tooltipTranslations.get(text);
+            if (!pendingTooltipTranslations.has(text)) {
+                const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=tr&tl=en&dt=t&q=" +
+                    encodeURIComponent(text);
+                const request = fetch(url).then(async (response) => {
+                    if (!response.ok) throw new Error(`Translation service returned ${response.status}.`);
+                    const result = await response.json();
+                    if (!Array.isArray(result[0])) throw new Error("Translation service returned an invalid response.");
+                    return result[0].map((part) => part[0]).join("");
+                }).then((translated) => {
+                    if (generation !== translationGeneration || !isEnglish) return;
+                    tooltipTranslations.set(text, translated);
+                    chart.update("none");
+                }).catch((error) => {
+                    if (generation === translationGeneration && isEnglish) {
+                        languageStatus.textContent = `Tooltip translation failed: ${error.message}`;
+                    }
+                }).finally(() => {
+                    pendingTooltipTranslations.delete(text);
+                });
+                pendingTooltipTranslations.set(text, request);
+            }
+            return "Translating...";
+        }
+
+        function collectTranslationEntries(root, frameWindow) {
+            const entries = [];
+            const addEntry = (text, apply, restore) => {
+                if (typeof text === "string" && text.trim()) entries.push({ text, apply, restore });
+            };
+            const addTextNode = (node) => {
+                if (trackedTextNodes.has(node) || !node.nodeValue.trim()) return;
+                const parent = node.parentElement;
+                if (!parent || parent.closest("script, style, noscript, textarea, code, pre, svg")) return;
+                trackedTextNodes.add(node);
+                const original = node.nodeValue;
+                const leading = original.match(/^\s*/)[0];
+                const trailing = original.match(/\s*$/)[0];
+                const content = original.trim();
+                addEntry(content, (translated) => {
+                    node.nodeValue = leading + translated + trailing;
+                }, () => {
+                    node.nodeValue = original;
+                });
+            };
+            const addElement = (element) => {
+                ["alt", "aria-label", "placeholder", "title"].forEach((attribute) => {
+                    if (!element.hasAttribute(attribute)) return;
+                    const original = element.getAttribute(attribute);
+                    addEntry(original, (translated) => element.setAttribute(attribute, translated),
+                        () => element.setAttribute(attribute, original));
+                });
+                if (element.matches('input[type="button"], input[type="submit"], input[type="reset"]')) {
+                    const original = element.value;
+                    addEntry(original, (translated) => { element.value = translated; },
+                        () => { element.value = original; });
+                }
+            };
+            const visit = (node) => {
+                if (node.nodeType === frameWindow.Node.TEXT_NODE) {
+                    addTextNode(node);
+                } else if (node.nodeType === frameWindow.Node.ELEMENT_NODE) {
+                    addElement(node);
+                    const walker = root.ownerDocument.createTreeWalker(node, frameWindow.NodeFilter.SHOW_TEXT);
+                    let textNode;
+                    while ((textNode = walker.nextNode())) addTextNode(textNode);
+                }
+            };
+
+            if (root.nodeType === frameWindow.Node.DOCUMENT_NODE) {
+                const walker = root.createTreeWalker(root.documentElement, frameWindow.NodeFilter.SHOW_TEXT);
+                let textNode;
+                while ((textNode = walker.nextNode())) addTextNode(textNode);
+                root.querySelectorAll("*").forEach(addElement);
+            } else {
+                visit(root);
+            }
+
+            const charts = frameWindow.Chart && frameWindow.Chart.instances;
+            if (root.nodeType === frameWindow.Node.DOCUMENT_NODE && charts) {
+                Object.keys(charts).forEach((key) => {
+                    const chart = charts[key];
+                    (chart.data.labels || []).forEach((label, index) => {
+                        if (typeof label !== "string") return;
+                        addEntry(label, (translated) => { chart.data.labels[index] = translated; },
+                            () => { chart.data.labels[index] = label; });
+                    });
+                    (chart.data.datasets || []).forEach((dataset) => {
+                        if (typeof dataset.label !== "string") return;
+                        const original = dataset.label;
+                        addEntry(original, (translated) => { dataset.label = translated; },
+                            () => { dataset.label = original; });
+                    });
+                    const tooltip = chart.options.plugins && chart.options.plugins.tooltip;
+                    const callbacks = tooltip && tooltip.callbacks;
+                    if (callbacks) {
+                        Object.keys(callbacks).forEach((name) => {
+                            const original = callbacks[name];
+                            if (typeof original !== "function") return;
+                            callbacks[name] = function() {
+                                return translateTooltipValue(original.apply(this, arguments), chart, translationGeneration);
+                            };
+                            entries.push({ text: "", restore: () => {
+                                callbacks[name] = original;
+                            } });
+                        });
+                    }
+                    ["x", "y"].forEach((axis) => {
+                        const title = chart.options.scales && chart.options.scales[axis] &&
+                            chart.options.scales[axis].title;
+                        if (!title || typeof title.text !== "string") return;
+                        const original = title.text;
+                        addEntry(original, (translated) => { title.text = translated; },
+                            () => { title.text = original; });
+                    });
+                });
+            }
+            return entries;
+        }
+
+        async function translateEntries(entries, generation) {
+            const batches = [];
+            let batch = [];
+            let batchLength = 0;
+            entries.filter((entry) => entry.text && entry.text.trim()).forEach((entry) => {
+                const length = entry.text.trim().length;
+                if (batch.length && batchLength + length > 2600) {
+                    batches.push(batch);
+                    batch = [];
+                    batchLength = 0;
+                }
+                batch.push(entry);
+                batchLength += length;
+            });
+            if (batch.length) batches.push(batch);
+
+            async function translateBatch(currentBatch, batchIndex, depth) {
+                if (generation !== translationGeneration || !isEnglish) return;
+                const separator = ` CAPELLA_SPLIT_${generation}_${batchIndex}_${depth}_ `;
+                const source = currentBatch.length === 1
+                    ? currentBatch[0].text.trim()
+                    : currentBatch.map((entry) => entry.text.trim()).join(separator);
+                const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=tr&tl=en&dt=t&q=" +
+                    encodeURIComponent(source);
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`Translation service returned ${response.status}.`);
+                const result = await response.json();
+                if (!Array.isArray(result[0])) throw new Error("Translation service returned an invalid response.");
+                if (generation !== translationGeneration || !isEnglish) return;
+                const translatedText = result[0].map((part) => part[0]).join("");
+                const translations = currentBatch.length === 1 ? [translatedText] : translatedText.split(separator);
+                if (translations.length !== currentBatch.length) {
+                    if (currentBatch.length === 1) throw new Error("Translation response did not match the page content.");
+                    const midpoint = Math.ceil(currentBatch.length / 2);
+                    await translateBatch(currentBatch.slice(0, midpoint), batchIndex, depth + 1);
+                    await translateBatch(currentBatch.slice(midpoint), batchIndex, depth + 1);
+                    return;
+                }
+                currentBatch.forEach((entry, index) => {
+                    const translated = translations[index].trim();
+                    const original = entry.text;
+                    const leading = original.match(/^\s*/)[0];
+                    const trailing = original.match(/\s*$/)[0];
+                    entry.apply(leading + translated + trailing);
+                });
+            }
+
+            for (let offset = 0; offset < batches.length; offset += 3) {
+                const group = batches.slice(offset, offset + 3);
+                await Promise.all(group.map((currentBatch, index) =>
+                    translateBatch(currentBatch, offset + index, 0)));
+                if (generation === translationGeneration && isEnglish) {
+                    languageStatus.textContent = `Translating page (${Math.min(offset + group.length, batches.length)}/${batches.length})...`;
+                }
+            }
+        }
+
+        async function translateFrameNodes(nodes, generation) {
+            const frameDocument = appFrame.contentDocument;
+            const frameWindow = appFrame.contentWindow;
+            if (!frameDocument || !frameWindow || !isEnglish) return;
+            const entries = [];
+            nodes.forEach((node) => entries.push(...collectTranslationEntries(node, frameWindow)));
+            if (!entries.length) return;
+            translationEntries.push(...entries);
+            await translateEntries(entries, generation);
+            if (generation === translationGeneration && frameWindow.Chart) {
+                Object.keys(frameWindow.Chart.instances).forEach((key) => {
+                    frameWindow.Chart.instances[key].update("none");
+                });
+            }
+        }
+
+        async function translateFrame() {
+            const frameDocument = appFrame.contentDocument;
+            const frameWindow = appFrame.contentWindow;
+            if (!frameDocument || !frameWindow || !frameDocument.body) return;
+            translationGeneration += 1;
+            const generation = translationGeneration;
+            restoreFrameTranslation();
+            translationDocument = frameDocument;
+            frameDocument.documentElement.lang = isEnglish ? "en" : "tr";
+            if (!isEnglish) {
+                languageStatus.textContent = "";
+                return;
+            }
+
+            languageStatus.textContent = "Translating page...";
+            const entries = collectTranslationEntries(frameDocument, frameWindow);
+            translationEntries = entries;
+            translationObserver = new frameWindow.MutationObserver((mutations) => {
+                const addedNodes = [];
+                mutations.forEach((mutation) => addedNodes.push(...mutation.addedNodes));
+                void translateFrameNodes(addedNodes, generation).catch((error) => {
+                    if (generation === translationGeneration) {
+                        languageStatus.textContent = `Translation failed: ${error.message}`;
+                    }
+                });
+            });
+            translationObserver.observe(frameDocument.body, { childList: true, subtree: true });
+
+            try {
+                await translateEntries(entries, generation);
+                if (generation !== translationGeneration) return;
+                if (frameWindow.Chart) {
+                    Object.keys(frameWindow.Chart.instances).forEach((key) => {
+                        frameWindow.Chart.instances[key].update("none");
+                    });
+                }
+                languageStatus.textContent = "";
+            } catch (error) {
+                if (generation !== translationGeneration) return;
+                translationGeneration += 1;
+                restoreFrameTranslation();
+                if (appFrame.contentDocument) appFrame.contentDocument.documentElement.lang = "tr";
+                languageStatus.textContent = `Translation failed: ${error.message}`;
+            }
+        }
+
+        setAppLanguage();
+
+        themeToggle.addEventListener("click", () => {
+            setTheme(!document.documentElement.classList.contains("dark"));
+            sendThemeToFrame();
+        });
+
+        appFrame.addEventListener("load", () => {
+            sendThemeToFrame();
+            void translateFrame();
+        });
+        window.addEventListener("message", (event) => {
+            if (event.source !== appFrame.contentWindow || !event.data || event.data.type !== "capella-theme") return;
+            setTheme(event.data.dark === true);
+        });
+
+        pageButtons.forEach((button) => {
+            button.addEventListener("click", () => {
+                translationGeneration += 1;
+                restoreFrameTranslation();
+                appFrame.src = button.dataset.page;
+                pageButtons.forEach((item) => item.classList.remove("active"));
+                button.classList.add("active");
+            });
+        });
+    </script>
+</body>
+</html>
